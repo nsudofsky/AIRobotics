@@ -1,0 +1,184 @@
+import cv2
+import numpy as np
+from PIL import Image
+
+IMAGE_PATH = '/Users/tashasudofsky/AIRobotics/IMG_7303.jpg'
+WINDOW = 'Kernel playground - move mouse over LEFT image, q to quit'
+
+img = Image.open(IMAGE_PATH)
+gray = img.convert('L')
+gray_np = np.array(gray)
+
+# Shrink just for display so the window fits on screen; convolution still
+# happens on the full-resolution array. Both panels use this same size.
+MAX_DISPLAY_WIDTH = 500
+if gray_np.shape[1] > MAX_DISPLAY_WIDTH:
+    scale = MAX_DISPLAY_WIDTH / gray_np.shape[1]
+    display_size = (MAX_DISPLAY_WIDTH, int(gray_np.shape[0] * scale))
+else:
+    scale = 1.0
+    display_size = (gray_np.shape[1], gray_np.shape[0])
+
+INFO_HEIGHT = 160  # strip below the images for the numbers
+
+
+def identity_kernel(strength):
+    return np.array([[0, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=np.float32)
+
+
+def blur_kernel(strength):
+    # strength 1-10 -> box size 3,5,...,21 (bigger box = "duller")
+    size = 2 * strength + 1
+    return np.ones((size, size), dtype=np.float32) / (size * size)
+
+
+def sharpen_kernel(strength):
+    return np.array([
+        [0, -strength, 0],
+        [-strength, 1 + 4 * strength, -strength],
+        [0, -strength, 0],
+    ], dtype=np.float32)
+
+
+def edge_kernel(strength):
+    base = np.array([
+        [-1, -1, -1],
+        [-1, 8, -1],
+        [-1, -1, -1],
+    ], dtype=np.float32)
+    return base * (strength / 5.0)
+
+
+def emboss_kernel(strength):
+    base = np.array([
+        [-2, -1, 0],
+        [-1, 1, 1],
+        [0, 1, 2],
+    ], dtype=np.float32)
+    return base * (strength / 5.0)
+
+
+KERNELS = [
+    ('Identity', identity_kernel),
+    ('Blur (dull)', blur_kernel),
+    ('Sharpen', sharpen_kernel),
+    ('Edge detect', edge_kernel),
+    ('Emboss', emboss_kernel),
+]
+
+# Pre-initialized so the first draw doesn't depend on trackbar callback
+# firing order (OpenCV can invoke a trackbar's callback as soon as it's
+# created, before later trackbars exist yet).
+state = {
+    'kernel_idx': 2,
+    'strength': 3,
+    'cx': gray_np.shape[1] // 2,  # kernel center, in FULL-RES image coords
+    'cy': gray_np.shape[0] // 2,
+}
+
+
+def current_kernel():
+    name, builder = KERNELS[state['kernel_idx']]
+    return name, builder(state['strength'])
+
+
+def clamp_center(kernel_shape):
+    kh, kw = kernel_shape
+    half_h, half_w = kh // 2, kw // 2
+    state['cx'] = int(np.clip(state['cx'], half_w, gray_np.shape[1] - 1 - half_w))
+    state['cy'] = int(np.clip(state['cy'], half_h, gray_np.shape[0] - 1 - half_h))
+
+
+def draw_info_panel(width, name, kernel, neighborhood, output_value):
+    panel = np.zeros((INFO_HEIGHT, width, 3), dtype=np.uint8)
+    kh, kw = kernel.shape
+
+    y = 20
+    cv2.putText(panel, f'{name}  ({kh}x{kw}, strength={state["strength"]})  '
+                        f'at ({state["cx"]}, {state["cy"]})',
+                (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1)
+    y += 25
+
+    if kh <= 5 and kw <= 5:
+        # Small enough to print the actual numbers, like setosa's demo.
+        for r in range(kh):
+            pix_row = ' '.join(f'{v:3d}' for v in neighborhood[r])
+            ker_row = ' '.join(f'{v:5.1f}' for v in kernel[r])
+            cv2.putText(panel, f'pixels: {pix_row}    kernel: {ker_row}',
+                        (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            y += 20
+    else:
+        cv2.putText(panel, f'(kernel too big to print — {kh}x{kw} box)',
+                    (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        y += 20
+
+    y += 10
+    cv2.putText(panel, f'output pixel value = {output_value}', (10, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    return panel
+
+
+def redraw():
+    name, kernel = current_kernel()
+    clamp_center(kernel.shape)
+    kh, kw = kernel.shape
+    half_h, half_w = kh // 2, kw // 2
+    cx, cy = state['cx'], state['cy']
+
+    filtered = cv2.filter2D(gray_np, -1, kernel)
+
+    neighborhood = gray_np[cy - half_h:cy + half_h + 1, cx - half_w:cx + half_w + 1]
+    output_value = int(np.clip(np.sum(neighborhood.astype(np.float32) * kernel), 0, 255))
+
+    left = cv2.cvtColor(cv2.resize(gray_np, display_size, interpolation=cv2.INTER_NEAREST),
+                         cv2.COLOR_GRAY2BGR)
+    right = cv2.cvtColor(cv2.resize(filtered, display_size, interpolation=cv2.INTER_NEAREST),
+                          cv2.COLOR_GRAY2BGR)
+
+    # Highlight the kernel's footprint on the original (left) image, and mark
+    # the single output pixel it produces on the filtered (right) image.
+    dx, dy = int(round(half_w * scale)), int(round(half_h * scale))
+    disp_x, disp_y = int(round(cx * scale)), int(round(cy * scale))
+    cv2.rectangle(left, (disp_x - dx, disp_y - dy), (disp_x + dx, disp_y + dy), (0, 255, 0), 2)
+    cv2.circle(right, (disp_x, disp_y), 4, (0, 255, 255), -1)
+
+    divider = np.full((display_size[1], 4, 3), 128, dtype=np.uint8)
+    top = np.hstack([left, divider, right])
+    info = draw_info_panel(top.shape[1], name, kernel, neighborhood, output_value)
+    canvas = np.vstack([top, info])
+
+    cv2.imshow(WINDOW, canvas)
+
+
+def on_mouse(event, x, y, flags, param):
+    if event not in (cv2.EVENT_MOUSEMOVE, cv2.EVENT_LBUTTONDOWN):
+        return
+    if x >= display_size[0]:  # ignore the right (filtered) panel / divider
+        return
+    state['cx'] = int(x / scale)
+    state['cy'] = int(y / scale)
+    redraw()
+
+
+def on_kernel_change(val):
+    state['kernel_idx'] = val
+    redraw()
+
+
+def on_strength_change(val):
+    state['strength'] = max(val, 1)
+    redraw()
+
+
+cv2.namedWindow(WINDOW)
+cv2.createTrackbar('Kernel', WINDOW, state['kernel_idx'], len(KERNELS) - 1, on_kernel_change)
+cv2.createTrackbar('Strength', WINDOW, state['strength'], 10, on_strength_change)
+cv2.setMouseCallback(WINDOW, on_mouse)
+redraw()
+
+while True:
+    key = cv2.waitKey(50) & 0xFF
+    if key == ord('q') or key == 27:  # q or Esc
+        break
+
+cv2.destroyAllWindows()

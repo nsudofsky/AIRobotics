@@ -1,0 +1,9 @@
+legoeducation==1.1.1      # lelib.py, main.py — LEGO Education hub BLE protocol
+opencv-python==4.13.0.92  # camlib.py — camera enumeration/capture (NOT the -headless variant)
+numpy>=1.24               # camlib.py, whistling.py — frame arrays / FFT
+sounddevice>=0.4          # miclib.py, songs.py — audio device listing / song playback
+paho-mqtt>=2.0            # mqttlib.py — MQTT publish/subscribe
+matplotlib>=3.8           # whistling.py — live signal/decision display
+pyaudio==0.2.14           # whistling.py — mic capture. Needs the PortAudio C library first:
+                           #   brew install portaudio && pip install pyaudio
+                           # (no Homebrew here — see whistlingworldcup/README.md for the from-source build used instead)

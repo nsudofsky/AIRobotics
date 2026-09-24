@@ -1,0 +1,33 @@
+import cv2
+import cv2.aruco as aruco
+
+# 36h11 is the AprilTag family most robotics tooling (and this class's
+# pose-race code) expects -- best inter-tag distance of the small families,
+# so misreads are rare even with a so-so phone/webcam.
+FAMILY = aruco.DICT_APRILTAG_36h11
+TAG_ID = 0
+TAG_PIXELS = 200          # resolution of the tag itself (before border/margin)
+BORDER_PIXELS = 40        # white quiet-zone required around the tag for detection
+OUTPUT_PATH = f'/Users/tashasudofsky/AIRobotics/tag_36h11_id{TAG_ID}.png'
+
+aruco_dict = aruco.getPredefinedDictionary(FAMILY)
+tag = aruco.generateImageMarker(aruco_dict, TAG_ID, TAG_PIXELS)
+
+# Pad with white so the tag has a quiet zone -- detectors need blank margin
+# around the black border to lock onto it.
+padded = cv2.copyMakeBorder(
+    tag, BORDER_PIXELS, BORDER_PIXELS, BORDER_PIXELS, BORDER_PIXELS,
+    cv2.BORDER_CONSTANT, value=255,
+)
+
+cv2.imwrite(OUTPUT_PATH, padded)
+print(f'Saved {OUTPUT_PATH} ({padded.shape[1]}x{padded.shape[0]}px)')
+print('Open it (e.g. `open tag_36h11_id0.png` on macOS) and print it.')
+print('When printing, disable "scale to fit" so the tag keeps a known size --')
+print('pose/distance estimation needs the real-world side length in meters.')
+
+cv2.imshow('AprilTag (press q to close)', padded)
+while True:
+    if cv2.waitKey(50) & 0xFF in (ord('q'), 27):
+        break
+cv2.destroyAllWindows()
